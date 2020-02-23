@@ -45,13 +45,16 @@ class _CornerStorageBuilder:
         return StorageImpl(item[1] for item in sorted(self._corners.items()))
 
 
-def build_frame_corners(corners) -> FrameCorners:
+def build_frame_corners(corners, ids, next_id) -> FrameCorners:
     corners_number = corners.shape[0]
+    new_corners = corners.shape[0] - len(ids)
+    next_id1 = next_id + new_corners
+    new_ids = np.concatenate((ids, np.arange(next_id, next_id1)))
     return FrameCorners(
-        np.arange(corners_number),
+        new_ids,
         np.array(corners),
         np.ones(corners_number) * 20
-    )
+    ), new_ids, next_id1
 
 
 def add_new_coreners(corners_old, corners_new):
@@ -74,15 +77,18 @@ def _build_impl(frame_sequence: pims.FramesSequence,
     image_0 = frame_sequence[0]
     image_0 = (image_0 * 256).astype(np.uint8)
     corners_cv = cv2.goodFeaturesToTrack(image_0, **feature_params)
-    corners = build_frame_corners(corners_cv)
+    corners, ids, next_id = build_frame_corners(corners_cv, np.array([]), 0)
     builder.set_corners_at_frame(0, corners)
     for frame, image_1 in enumerate(frame_sequence[1:], 1):
         corners_new = cv2.goodFeaturesToTrack(image_1, **feature_params)
         image_1 = (image_1 * 256).astype(np.uint8)
         corners_cv1, _, err = cv2.calcOpticalFlowPyrLK(image_0, image_1, corners_cv, None, **lk_params)
+
         corners_cv_filtered = corners_cv1[np.stack([err, err]).transpose((1,2,0)) < MAX_ERROR].reshape(-1, 1, 2)
+        ids = ids[err.squeeze() < MAX_ERROR]
+
         coreners_cv1 = add_new_coreners(corners_cv_filtered, corners_new)
-        corners = build_frame_corners(coreners_cv1)
+        corners, ids, next_id = build_frame_corners(coreners_cv1, ids, next_id)
         builder.set_corners_at_frame(frame, corners)
 
         image_0 = image_1
