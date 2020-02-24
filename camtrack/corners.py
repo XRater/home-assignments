@@ -77,7 +77,7 @@ def _build_impl(frame_sequence: pims.FramesSequence,
     image_0 = frame_sequence[0]
     image_0 = (image_0 * 256).astype(np.uint8)
     corners_cv = cv2.goodFeaturesToTrack(image_0, **feature_params)
-    corners, ids, next_id = build_frame_corners(corners_cv, np.array([]), 0)
+    corners, ids, next_id = build_frame_corners(corners_cv, np.array([]).astype(np.int32), 0)
     builder.set_corners_at_frame(0, corners)
     for frame, image_1 in enumerate(frame_sequence[1:], 1):
         corners_new = cv2.goodFeaturesToTrack(image_1, **feature_params)

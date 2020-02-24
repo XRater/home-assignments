@@ -36,7 +36,14 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     )
 
     # TODO: implement
-    view_mats, point_cloud_builder = [], PointCloudBuilder()
+    view_mats, point_cloud_builder = [], PointCloudBuilder(np.array([]).astype(np.int64))
+
+    example = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]])
+    for i in range(len(rgb_sequence)):
+        view_mats.append(example)
+
+    corners_number = corner_storage._max_id
+    point_cloud_builder.add_points(np.arange(corners_number), np.ones((corners_number, 3)))
 
     calc_point_cloud_colors(
         point_cloud_builder,
