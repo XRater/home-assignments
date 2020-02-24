@@ -18,7 +18,7 @@ import pims
 from _corners import FrameCorners, CornerStorage, StorageImpl
 from _corners import dump, load, draw, without_short_tracks, create_cli
 
-MAX_CORNERS = 100
+MAX_CORNERS = 1000
 MIN_DISTANCE = 15
 MAX_ERROR = 6
 lk_params = dict(winSize=(15, 15),
@@ -53,7 +53,7 @@ def build_frame_corners(corners, ids, next_id) -> FrameCorners:
     return FrameCorners(
         new_ids,
         np.array(corners),
-        np.ones(corners_number) * 20
+        np.ones(corners_number) * 5
     ), new_ids, next_id1
 
 
