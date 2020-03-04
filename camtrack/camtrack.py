@@ -50,7 +50,10 @@ def try_set_view_matrix(point_cloud_builder, corner_storage, view_mats, intrinsi
     image_points = frame_corners.points[indices_2]
     if image_points.shape[0] < 5:
         return False
-    success, rvec, tvec, inliers = cv2.solvePnPRansac(object_points, image_points, intrinsic_mat, np.zeros((4, 1)))
+    try:
+        success, rvec, tvec, inliers = cv2.solvePnPRansac(object_points, image_points, intrinsic_mat, np.zeros((4, 1)))
+    except:
+        return False
     if not success:
         return False
     view_mats[frame] = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
