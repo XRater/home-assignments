@@ -22,12 +22,15 @@ from _camtrack import (
     pose_to_view_mat3x4,
     build_correspondences,
     triangulate_correspondences,
-    rodrigues_and_translation_to_view_mat3x4
+    rodrigues_and_translation_to_view_mat3x4,
+    eye3x4
 )
 import sortednp as snp
 
-first_params = TriangulationParameters(1.0, 0, 0.1)
+init_params = TriangulationParameters(1.0, 0.1, 0.1)
 all_params = TriangulationParameters(1.0, 1, 0.1)
+
+MAX_INIT_ERROR = 1e9
 
 
 def try_add_points(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame1, frame2, params):
@@ -39,9 +42,24 @@ def try_add_points(point_cloud_builder, corner_storage, view_mats, intrinsic_mat
     return True
 
 
-def try_set_view_matrix(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame):
-    if not view_mats[frame] is None:
-        return False
+def estimate_views(corner_storage, intrinsic_mat, pose1, pose2, frame1, frame2):
+    view_mat_1 = pose_to_view_mat3x4(pose1)
+    view_mat_2 = pose_to_view_mat3x4(pose2)
+    correspondences = build_correspondences(corner_storage[frame1], corner_storage[frame2])
+    points, points_ids, cos = triangulate_correspondences(correspondences, view_mat_1, view_mat_2, intrinsic_mat, init_params)
+    return points.shape[0], cos
+
+
+def remove_outliers(point_cloud_builder, ids, inliers):
+    filtered_number = 0
+    for id in ids:
+        if not id in inliers:
+            point_cloud_builder.remove_point(id)
+            filtered_number += 1
+    print(f"Filtered {filtered_number} outliers")
+
+
+def try_set_view_matrix(point_cloud_builder, corner_storage, view_mats, inliers_array, intrinsic_mat, frame):
     points = point_cloud_builder.points
     points_ids = point_cloud_builder.ids
     frame_corners = corner_storage[frame]
@@ -56,8 +74,69 @@ def try_set_view_matrix(point_cloud_builder, corner_storage, view_mats, intrinsi
         return False
     if not success:
         return False
-    view_mats[frame] = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
-    return True
+    if inliers_array[frame] is None or inliers_array[frame] < len(inliers):
+        print(f'Matrix was updated for frame {frame} with {len(inliers)} inliers')
+        view_mats[frame] = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
+        inliers_array[frame] = len(inliers)
+        return True
+    return False
+
+
+def generate_frame_pairs_first(max_frame):
+    pairs = []
+    for i in range(1, max_frame):
+        pairs.append((0, i))
+    return pairs
+
+
+def generate_frame_pairs_all(max_frame):
+    pairs = []
+    for i in range(max_frame):
+        for j in range(i, max_frame):
+            pairs.append((i, j))
+    return pairs
+
+
+def get_views_by_frames(corner_storage, intrinsic_mat, frame1, frame2):
+    correspondences = build_correspondences(corner_storage[frame1], corner_storage[frame2])
+    if len(correspondences[0]) < 5:
+        print(f"Not enouth points to build essential matrix for frames {frame1}, {frame2}")
+        return False, None, None
+    points1, points2 = correspondences[1], correspondences[2]
+    essential_matrix, mask = cv2.findEssentialMat(points1, points2, intrinsic_mat)
+    points_number, R, t, mask = cv2.recoverPose(essential_matrix, points1, points2, intrinsic_mat, mask=mask)
+    first_pos = Pose(np.eye(3, 3, dtype=np.float32), np.zeros((3, 1), dtype=np.float32))
+    second_pos = Pose(R, t)
+    if points_number < 10:
+        return False, None, None
+    return True, first_pos, second_pos
+
+
+def get_best_result(results):
+    best = None
+    for res in results:
+        if best is None:
+            best = res
+            continue
+        _, _, (points_number, cos) = res
+        _, _, (best_points_number, best_cos) = best
+        if (cos >= 0.1 or best_cos < 0.1) and points_number > best_points_number:
+            best = res
+    return best
+
+
+def find_best_views(corner_storage, intrinsic_mat):
+    print("Searching best view for initialization")
+    frames_number = len(corner_storage)
+    results = []
+    for f1, f2 in generate_frame_pairs_first(frames_number):
+        print(f"Checking {f1, f2} / {frames_number}")
+        success, pose1, pose2 = get_views_by_frames(corner_storage, intrinsic_mat, f1, f2)
+        if not success:
+            continue
+        result = estimate_views(corner_storage, intrinsic_mat, pose1, pose2, f1, f2)
+        results.append(((f1, pose1), (f2, pose2), result))
+    return get_best_result(results)
 
 
 def track_and_calc_colors(camera_parameters: CameraParameters,
@@ -66,24 +145,33 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                           known_view_1: Optional[Tuple[int, Pose]] = None,
                           known_view_2: Optional[Tuple[int, Pose]] = None) \
         -> Tuple[List[Pose], PointCloud]:
-    if known_view_1 is None or known_view_2 is None:
-        raise NotImplementedError()
-
     rgb_sequence = frameseq.read_rgb_f32(frame_sequence_path)
     intrinsic_mat = to_opencv_camera_mat3x3(
         camera_parameters,
         rgb_sequence[0].shape[0]
     )
 
+    print(f"Building camera track and point of clouds for {len(corner_storage)} frames")
+    if known_view_1 is None or known_view_2 is None:
+        known_view_1, known_view_2, result = find_best_views(corner_storage, intrinsic_mat)
+        if known_view_1 is None or known_view_2 is None:
+            raise ValueError("Could not find any frames to initialize")
+        print(f"Initial number of points value is {result}. Initialized with frames {known_view_1[0]}, {known_view_2[0]}")
+    else:
+        print(f"Intializing with given views: {known_view_1[0]}, {known_view_2[0]}")
+
     frames_number = len(rgb_sequence)
-    view_mats, point_cloud_builder = [None] * frames_number, PointCloudBuilder(np.array([]).astype(np.int64))
+    inliers, view_mats, point_cloud_builder = [None] * frames_number, [None] * frames_number, PointCloudBuilder(np.array([]).astype(np.int64))
 
     frame1, pos1 = known_view_1
     frame2, pos2 = known_view_2
     view_mats[frame1] = pose_to_view_mat3x4(pos1)
+    inliers[frame1] = 0
     view_mats[frame2] = pose_to_view_mat3x4(pos2)
+    inliers[frame2] = 0
 
-    try_add_points(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame1, frame2, first_params)
+    try_add_points(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame1, frame2, init_params)
+    print(f"PC size after first step is: {point_cloud_builder.points.shape[0]}")
 
     updated = True
     epoch = 0
@@ -92,14 +180,17 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         updated = False
         print(f"Current epoch: {epoch}")
         for frame in range(frames_number):
-            try_set_view_matrix(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame)
+            initial_size = point_cloud_builder.points.shape[0]
+            status = try_set_view_matrix(point_cloud_builder, corner_storage, view_mats, inliers, intrinsic_mat, frame)
+            if status:
+                updated = True
             for frame2 in range(frames_number):
                 old_size = point_cloud_builder.points.shape[0]
                 try_add_points(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame, frame2, all_params)
                 new_size = point_cloud_builder.points.shape[0]
                 if old_size != new_size:
                     updated = True
-            print(f'Processed {frame + 1} frames of {frames_number} in epoch {epoch}')
+            print(f'Processed {frame + 1} frames of {frames_number} in epoch {epoch}: PC size {initial_size} -> {point_cloud_builder.points.shape[0]}')
 
         views_unset = len(list(filter(lambda mat: mat is None, view_mats)))
         print(f'After epoch {epoch} {frames_number - views_unset} are set')
@@ -108,6 +199,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     if unset_views_number != 0:
         raise ValueError(f"Failed to find view matrix for {unset_views_number} frames")
 
+    print(f"Building done. All view matrix are set, PC size is {point_cloud_builder.points.shape[0]}")
     calc_point_cloud_colors(
         point_cloud_builder,
         rgb_sequence,
