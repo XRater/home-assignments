@@ -27,10 +27,7 @@ from _camtrack import (
 )
 import sortednp as snp
 
-init_params = TriangulationParameters(1.0, 0.1, 0.1)
-all_params = TriangulationParameters(1.0, 1, 0.1)
-
-MAX_INIT_ERROR = 1e9
+params = TriangulationParameters(3, 7.3, 0.1)
 
 
 def try_add_points(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame1, frame2, params):
@@ -46,7 +43,7 @@ def estimate_views(corner_storage, intrinsic_mat, pose1, pose2, frame1, frame2):
     view_mat_1 = pose_to_view_mat3x4(pose1)
     view_mat_2 = pose_to_view_mat3x4(pose2)
     correspondences = build_correspondences(corner_storage[frame1], corner_storage[frame2])
-    points, points_ids, cos = triangulate_correspondences(correspondences, view_mat_1, view_mat_2, intrinsic_mat, init_params)
+    points, points_ids, cos = triangulate_correspondences(correspondences, view_mat_1, view_mat_2, intrinsic_mat, params)
     return points.shape[0], cos
 
 
@@ -104,12 +101,9 @@ def get_views_by_frames(corner_storage, intrinsic_mat, frame1, frame2):
         return False, None, None
     points1, points2 = correspondences[1], correspondences[2]
     essential_matrix, mask = cv2.findEssentialMat(points1, points2, intrinsic_mat)
-    points_number, R, t, mask = cv2.recoverPose(essential_matrix, points1, points2, intrinsic_mat, mask=mask)
     first_pos = Pose(np.eye(3, 3, dtype=np.float32), np.zeros((3, 1), dtype=np.float32))
-    second_pos = Pose(R, t)
-    if points_number < 10:
-        return False, None, None
-    return True, first_pos, second_pos
+    R1, R2, t = cv2.decomposeEssentialMat(essential_matrix)
+    return True, first_pos, Pose(R1, t), Pose(R2, t)
 
 
 def get_best_result(results):
@@ -131,11 +125,15 @@ def find_best_views(corner_storage, intrinsic_mat):
     results = []
     for f1, f2 in generate_frame_pairs_first(frames_number):
         print(f"Checking {f1, f2} / {frames_number}")
-        success, pose1, pose2 = get_views_by_frames(corner_storage, intrinsic_mat, f1, f2)
+        success, pose, pose1, pose2 = get_views_by_frames(corner_storage, intrinsic_mat, f1, f2)
         if not success:
             continue
-        result = estimate_views(corner_storage, intrinsic_mat, pose1, pose2, f1, f2)
-        results.append(((f1, pose1), (f2, pose2), result))
+        result = estimate_views(corner_storage, intrinsic_mat, pose, pose1, f1, f2)
+        results.append(((f1, pose), (f2, pose1), result))
+
+        result = estimate_views(corner_storage, intrinsic_mat, pose, pose2, f1, f2)
+        results.append(((f1, pose), (f2, pose2), result))
+
     return get_best_result(results)
 
 
@@ -170,7 +168,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     view_mats[frame2] = pose_to_view_mat3x4(pos2)
     inliers[frame2] = 0
 
-    try_add_points(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame1, frame2, init_params)
+    try_add_points(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame1, frame2, params)
     print(f"PC size after first step is: {point_cloud_builder.points.shape[0]}")
 
     updated = True
@@ -186,7 +184,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                 updated = True
             for frame2 in range(frames_number):
                 old_size = point_cloud_builder.points.shape[0]
-                try_add_points(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame, frame2, all_params)
+                try_add_points(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame, frame2, params)
                 new_size = point_cloud_builder.points.shape[0]
                 if old_size != new_size:
                     updated = True
