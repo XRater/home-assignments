@@ -258,7 +258,7 @@ class PointCloudBuilder:
     def __init__(self, ids: np.ndarray = None, points: np.ndarray = None,
                  colors: np.ndarray = None) -> None:
         super().__init__()
-        self._ids = ids if ids is not None else np.array([])
+        self._ids = ids if ids is not None else np.array([], dtype=np.int64)
         self._points = points if points is not None else np.array([])
         self._colors = colors
         self._sort_data()
@@ -289,6 +289,11 @@ class PointCloudBuilder:
         self._ids = np.vstack((self.ids, np.delete(ids, idx_2, axis=0)))
         self._points = np.vstack((self.points, np.delete(points, idx_2, axis=0)))
         self._sort_data()
+
+    def remove_point(self, id: int):
+        indices = np.where(self.ids == id)[0]
+        self._ids = np.delete(self._ids, indices, 0)
+        self._points = np.delete(self._points, indices, 0)
 
     def set_colors(self, colors: np.ndarray) -> None:
         assert self._ids.size == colors.shape[0]
