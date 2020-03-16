@@ -27,7 +27,7 @@ from _camtrack import (
 )
 import sortednp as snp
 
-params = TriangulationParameters(1, 8, 0.1)
+params = TriangulationParameters(2.2, 3, 0.1)
 
 
 def try_add_points(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame1, frame2, params):
@@ -103,7 +103,7 @@ def get_views_by_frames(corner_storage, intrinsic_mat, frame1, frame2):
         print(f"Not enouth points to build essential matrix for frames {frame1}, {frame2}")
         return False, None, None
     points1, points2 = correspondences[1], correspondences[2]
-    essential_matrix, mask = cv2.findEssentialMat(points1, points2, cameraMatrix=intrinsic_mat, prob=0.999, threshold=1.0)
+    essential_matrix, mask = cv2.findEssentialMat(points1, points2, cameraMatrix=intrinsic_mat)
     if essential_matrix is None or essential_matrix.shape != (3, 3):
         return False, None, None
     points_number, R, t, mask = cv2.recoverPose(essential_matrix, points1, points2, intrinsic_mat)
@@ -177,7 +177,8 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
 
     updated = True
     epoch = 0
-    while updated:
+    LIMIT = 2
+    while updated and epoch < LIMIT:
         epoch += 1
         updated = False
         print(f"Current epoch: {epoch}")
