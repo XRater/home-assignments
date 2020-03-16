@@ -27,7 +27,7 @@ from _camtrack import (
 )
 import sortednp as snp
 
-params = TriangulationParameters(3, 7.3, 0.1)
+params = TriangulationParameters(1, 8, 0.1)
 
 
 def try_add_points(point_cloud_builder, corner_storage, view_mats, intrinsic_mat, frame1, frame2, params):
@@ -79,10 +79,13 @@ def try_set_view_matrix(point_cloud_builder, corner_storage, view_mats, inliers_
     return False
 
 
-def generate_frame_pairs_first(max_frame):
+def generate_frame_pairs_with_fixed_init(max_frame):
+    init = [0, max_frame // 3, max_frame // 2, max_frame - 1]
     pairs = []
-    for i in range(1, max_frame):
-        pairs.append((0, i))
+    for i in init:
+        for j in range(0, max_frame):
+            if not j == i:
+                pairs.append((i, j))
     return pairs
 
 
@@ -100,10 +103,15 @@ def get_views_by_frames(corner_storage, intrinsic_mat, frame1, frame2):
         print(f"Not enouth points to build essential matrix for frames {frame1}, {frame2}")
         return False, None, None
     points1, points2 = correspondences[1], correspondences[2]
-    essential_matrix, mask = cv2.findEssentialMat(points1, points2, intrinsic_mat)
-    first_pos = Pose(np.eye(3, 3, dtype=np.float32), np.zeros((3, 1), dtype=np.float32))
-    R1, R2, t = cv2.decomposeEssentialMat(essential_matrix)
-    return True, first_pos, Pose(R1, t), Pose(R2, t)
+    essential_matrix, mask = cv2.findEssentialMat(points1, points2, cameraMatrix=intrinsic_mat, prob=0.999, threshold=1.0)
+    if essential_matrix is None or essential_matrix.shape != (3, 3):
+        return False, None, None
+    points_number, R, t, mask = cv2.recoverPose(essential_matrix, points1, points2, intrinsic_mat)
+    first_pos = view_mat3x4_to_pose(np.eye(3, 4))
+    second_pos = view_mat3x4_to_pose(np.hstack([R, t]))
+    if points_number < 10:
+        return False, None, None
+    return True, first_pos, second_pos
 
 
 def get_best_result(results):
@@ -114,7 +122,7 @@ def get_best_result(results):
             continue
         _, _, (points_number, cos) = res
         _, _, (best_points_number, best_cos) = best
-        if (cos >= 0.1 or best_cos < 0.1) and points_number > best_points_number:
+        if points_number > best_points_number:
             best = res
     return best
 
@@ -123,17 +131,13 @@ def find_best_views(corner_storage, intrinsic_mat):
     print("Searching best view for initialization")
     frames_number = len(corner_storage)
     results = []
-    for f1, f2 in generate_frame_pairs_first(frames_number):
+    for f1, f2 in generate_frame_pairs_with_fixed_init(frames_number):
         print(f"Checking {f1, f2} / {frames_number}")
-        success, pose, pose1, pose2 = get_views_by_frames(corner_storage, intrinsic_mat, f1, f2)
+        success, pose1, pose2 = get_views_by_frames(corner_storage, intrinsic_mat, f1, f2)
         if not success:
             continue
-        result = estimate_views(corner_storage, intrinsic_mat, pose, pose1, f1, f2)
-        results.append(((f1, pose), (f2, pose1), result))
-
-        result = estimate_views(corner_storage, intrinsic_mat, pose, pose2, f1, f2)
-        results.append(((f1, pose), (f2, pose2), result))
-
+        result = estimate_views(corner_storage, intrinsic_mat, pose1, pose2, f1, f2)
+        results.append(((f1, pose1), (f2, pose2), result))
     return get_best_result(results)
 
 
