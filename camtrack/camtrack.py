@@ -204,7 +204,13 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         raise ValueError(f"Failed to find view matrix for {unset_views_number} frames")
 
     print(f"Building done. All view matrix are set, PC size is {point_cloud_builder.points.shape[0]}")
-    view_mats = run_bundle_adjustment(intrinsic_mat, corner_storage, view_mats, point_cloud_builder)
+    try:
+        initial_builder = point_cloud_builder.copy()
+        view_mats = run_bundle_adjustment(intrinsic_mat, corner_storage, view_mats, point_cloud_builder)
+    except:
+        point_cloud_builder = initial_builder
+        print("Bundle adjustment failed")
+        pass
 
     calc_point_cloud_colors(
         point_cloud_builder,

@@ -128,18 +128,21 @@ def update_vector(vector, dx):
 
 
 def get_vectors_updates(J, errors, size):
-    JTJ = J.T @ J
-    JTJ += LAMBDA * np.diag(np.diag(JTJ))
-    U, W, V = JTJ[:size, :size], JTJ[:size, size:], JTJ[size:, size:]
-    Vi = np.zeros_like(V)
-    for i in range(0, len(V), 3):
-        s = 3 * i
-        Vi[s:s + 3, s:s + 3] = np.linalg.inv(V[s:s + 3, s:s + 3])
-    g = J.T @ errors
-    A = U - W @ Vi @ W.T
-    b = W @ Vi @ g[size:] - g[:size]
-    dc = np.linalg.solve(A, b)
-    dx = Vi @ (-g[size:] - W.T @ dc)
+    try:
+        JTJ = J.T @ J
+        JTJ += LAMBDA * np.diag(np.diag(JTJ))
+        U, W, V = JTJ[:size, :size], JTJ[:size, size:], JTJ[size:, size:]
+        Vi = np.zeros_like(V)
+        for i in range(0, len(V), 3):
+            s = 3 * i
+            Vi[s:s + 3, s:s + 3] = np.linalg.inv(V[s:s + 3, s:s + 3])
+        g = J.T @ errors
+        A = U - W @ Vi @ W.T
+        b = W @ Vi @ g[size:] - g[:size]
+        dc = np.linalg.solve(A, b)
+        dx = Vi @ (-g[size:] - W.T @ dc)
+    except np.linalg.LinAlgError:
+        return None, None
     return dc, dx
 
 
@@ -151,6 +154,8 @@ def optimize(projection_errors, corner_storage, intrinsic_mat, view_mats_vector,
         J = jacobian(projection_errors, corner_storage, intrinsic_mat, view_mats_vector, points_vector, indices)
         errors = get_errors(projection_errors, corner_storage, intrinsic_mat, view_mats_vector, points_vector, indices)
         dc, dx = get_vectors_updates(J, errors, size)
+        if dc is None or dx is None:
+            continue
         view_mats_vector = update_vector(view_mats_vector, dc)
         points_vector = update_vector(points_vector, dx)
 
@@ -158,3 +163,4 @@ def optimize(projection_errors, corner_storage, intrinsic_mat, view_mats_vector,
     print(f'Mean error after adjustment is {errors.mean()}')
 
     return view_mats_vector, points_vector
+
