@@ -26,6 +26,7 @@ from _camtrack import (
     eye3x4
 )
 import sortednp as snp
+from bundle_adjustment import run_bundle_adjustment
 
 params = TriangulationParameters(2.2, 3, 0.1)
 
@@ -203,6 +204,14 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         raise ValueError(f"Failed to find view matrix for {unset_views_number} frames")
 
     print(f"Building done. All view matrix are set, PC size is {point_cloud_builder.points.shape[0]}")
+    initial_ids, initial_points = point_cloud_builder.ids.copy(), point_cloud_builder.points.copy()
+    try:
+        view_mats = run_bundle_adjustment(intrinsic_mat, corner_storage, view_mats, point_cloud_builder)
+    except:
+        point_cloud_builder = PointCloudBuilder(initial_ids, initial_points)
+        print("Bundle adjustment failed")
+        pass
+
     calc_point_cloud_colors(
         point_cloud_builder,
         rgb_sequence,

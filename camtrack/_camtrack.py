@@ -251,6 +251,13 @@ def rodrigues_and_translation_to_view_mat3x4(r_vec: np.ndarray,
     return view_mat
 
 
+def view_mat3x4_to_rodrigues_and_translation(view_mat: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    r_mat = view_mat[:, :3]
+    t_vec = view_mat[:, 3]
+    r_vec, _ = cv2.Rodrigues(r_mat)
+    return r_vec, t_vec
+
+
 class PointCloudBuilder:
 
     __slots__ = ('_ids', '_points', '_colors')
